@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { supabase } from "@/lib/supabaseClient" // Import Supabase client
 
 type Cell = {
   value: number | null
@@ -26,7 +27,7 @@ interface LeaderboardEntry {
   nickname: string
   score: number
   timeTaken: number | null
-  timestamp: number
+  timestamp: string
 }
 
 const TILE_IMAGES: Record<number, string> = {
@@ -43,7 +44,7 @@ const TILE_IMAGES: Record<number, string> = {
   2048: "/images/2048.png",
 }
 
-const INITIAL_TIME = 45 // 45 seconds timer
+const WIN_TIME_TARGET = 45 // Target time in seconds for a "speed win" on leaderboard
 
 export default function LetterFusion() {
   const [grid, setGrid] = useState<Cell[][]>([])
@@ -53,9 +54,9 @@ export default function LetterFusion() {
   const [size] = useState(4)
   const [idCounter, setIdCounter] = useState(0)
 
-  const [timeLeft, setTimeLeft] = useState(INITIAL_TIME)
+  const [timeElapsed, setTimeElapsed] = useState(0) // Changed from timeLeft to timeElapsed
   const [timerActive, setTimerActive] = useState(false)
-  const [hasMadeFirstMove, setHasMadeFirstMove] = useState(false) // New state for first move
+  const [hasMadeFirstMove, setHasMadeFirstMove] = useState(false)
   const [showNicknameModal, setShowNicknameModal] = useState(false)
   const [nickname, setNickname] = useState("")
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([])
@@ -65,15 +66,29 @@ export default function LetterFusion() {
 
   const fetchLeaderboard = useCallback(async () => {
     try {
-      const res = await fetch("/api/leaderboard")
-      if (res.ok) {
-        const data = await res.json()
-        setLeaderboardData(data)
-      } else {
-        console.error("Failed to fetch leaderboard:", res.statusText)
+      const { data, error } = await supabase
+        .from("leaderboard")
+        .select("nickname, score, time_taken, timestamp")
+        .order("score", { ascending: false })
+        .order("time_taken", { ascending: true, nullsFirst: false })
+
+      if (error) {
+        console.error("Supabase fetch error:", error.message)
+        setLeaderboardData([]) // Set to empty on error
+        return
       }
+
+      // Map time_taken to timeTaken for client component compatibility
+      const mappedData: LeaderboardEntry[] = data.map((entry) => ({
+        nickname: entry.nickname,
+        score: entry.score,
+        timeTaken: entry.time_taken,
+        timestamp: entry.timestamp,
+      }))
+      setLeaderboardData(mappedData)
     } catch (error) {
       console.error("Error fetching leaderboard:", error)
+      setLeaderboardData([]) // Set to empty on error
     }
   }, [])
 
@@ -83,36 +98,51 @@ export default function LetterFusion() {
     fetchLeaderboard()
   }, [fetchLeaderboard])
 
-  // Timer logic
+  // Timer logic (counts up)
   useEffect(() => {
     let timer: NodeJS.Timeout
-    if (timerActive && timeLeft > 0 && !gameOver && !won) {
+    if (timerActive && !gameOver && !won) {
       timer = setInterval(() => {
-        setTimeLeft((prevTime) => prevTime - 1)
+        setTimeElapsed((prevTime) => prevTime + 1)
       }, 1000)
-    } else if (timeLeft === 0 && !won) {
-      setGameOver(true)
-      setTimerActive(false)
-      setGameOutcome("lose")
     }
     return () => clearInterval(timer)
-  }, [timeLeft, timerActive, gameOver, won])
+  }, [timerActive, gameOver, won])
 
   // Handle game end (win/lose)
   useEffect(() => {
     if (gameOver || won) {
       setTimerActive(false)
       setFinalScore(score)
+      console.log(
+        "Game ended. Won:",
+        won,
+        "GameOver:",
+        gameOver,
+        "Current timeElapsed:",
+        timeElapsed,
+        "Current timeToWin:",
+        timeToWin,
+      )
       if (won && timeToWin === null) {
         // Ensure timeToWin is only set once on win
-        setTimeToWin(INITIAL_TIME - timeLeft)
+        setTimeToWin(timeElapsed) // Record elapsed time on win
         setGameOutcome("win")
+        console.log("Setting timeToWin in useEffect to:", timeElapsed)
       } else if (gameOver && !won) {
         setGameOutcome("lose")
       }
       setShowNicknameModal(true)
+      console.log(
+        "Showing nickname modal. Game outcome:",
+        gameOutcome,
+        "Final score:",
+        finalScore,
+        "Time to win (after effect):",
+        timeToWin,
+      )
     }
-  }, [gameOver, won, score, timeLeft, timeToWin])
+  }, [gameOver, won, score, timeElapsed, timeToWin, gameOutcome])
 
   // Handle keyboard events
   const handleKeyDown = useCallback(
@@ -144,7 +174,7 @@ export default function LetterFusion() {
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [handleKeyDown]) // Added move to dependency array
+  }, [handleKeyDown])
 
   const startGame = () => {
     const newGrid = Array(size)
@@ -160,9 +190,9 @@ export default function LetterFusion() {
     setGameOver(false)
     setWon(false)
     setIdCounter(0)
-    setTimeLeft(INITIAL_TIME)
-    setTimerActive(false) // Timer is not active initially
-    setHasMadeFirstMove(false) // Reset first move flag
+    setTimeElapsed(0) // Reset timeElapsed
+    setTimerActive(false)
+    setHasMadeFirstMove(false)
     setShowNicknameModal(false)
     setNickname("")
     setFinalScore(0)
@@ -259,7 +289,7 @@ export default function LetterFusion() {
       }
     },
     [grid, hasMadeFirstMove],
-  ) // Added grid and hasMadeFirstMove to useCallback dependencies
+  )
 
   const processLine = (
     line: Cell[],
@@ -311,8 +341,9 @@ export default function LetterFusion() {
         setScore((prev) => prev + nextValue)
 
         if (nextValue === 2048) {
+          console.log("2048 tile reached! Setting won to true and timeToWin to", timeElapsed)
           setWon(true)
-          setTimeToWin(INITIAL_TIME - timeLeft) // Record time taken to win
+          setTimeToWin(timeElapsed) // Record elapsed time on win
           setGameOutcome("win")
         }
 
@@ -389,25 +420,25 @@ export default function LetterFusion() {
     }
 
     try {
-      const res = await fetch("/api/leaderboard", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          nickname: nickname.trim(),
-          score: finalScore,
-          timeTaken: gameOutcome === "win" ? timeToWin : null, // Only save time if won
-        }),
-      })
+      const { data, error } = await supabase
+        .from("leaderboard")
+        .insert([
+          {
+            nickname: nickname.trim(),
+            score: finalScore,
+            time_taken: gameOutcome === "win" ? timeToWin : null, // Use time_taken for Supabase column
+            timestamp: new Date().toISOString(),
+          },
+        ])
+        .select()
 
-      if (res.ok) {
+      if (error) {
+        console.error("Supabase insert error:", error.message)
+        alert(`Failed to save score: ${error.message}`)
+      } else {
         alert("Score saved successfully!")
         setShowNicknameModal(false)
         fetchLeaderboard() // Refresh leaderboard
-      } else {
-        const errorData = await res.json()
-        alert(`Failed to save score: ${errorData.message || res.statusText}`)
       }
     } catch (error) {
       console.error("Error submitting score:", error)
@@ -453,8 +484,8 @@ export default function LetterFusion() {
               <p className="text-sm text-gray-400">Score</p>
             </div>
             <div className="text-right">
-              <div className="text-2xl font-bold text-gray-100">{timeLeft}s</div>
-              <p className="text-sm text-gray-400">Time Left</p>
+              <div className="text-2xl font-bold text-gray-100">{timeElapsed}s</div> {/* Display timeElapsed */}
+              <p className="text-sm text-gray-400">Time Elapsed</p>
             </div>
           </div>
 
@@ -517,8 +548,8 @@ export default function LetterFusion() {
                 When two identical images collide, they merge into the next image in the sequence (e.g., 2 + 2 = 4).
               </li>
               <li>
-                Try to create the 2048 tile! If you do it within {INITIAL_TIME} seconds, your speed will be recorded on
-                the leaderboard.
+                Try to create the 2048 tile! If you do, your time will be recorded on the leaderboard. Aim for under{" "}
+                {WIN_TIME_TARGET} seconds for a speed record!
               </li>
             </ul>
           </div>
@@ -533,7 +564,7 @@ export default function LetterFusion() {
                 <TableHead className="text-gray-300">Rank</TableHead>
                 <TableHead className="text-gray-300">Nickname</TableHead>
                 <TableHead className="text-gray-300">Score</TableHead>
-                <TableHead className="text-gray-300">Speed (s)</TableHead>
+                <TableHead className="text-gray-300">Time (s)</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -563,8 +594,7 @@ export default function LetterFusion() {
             </TableBody>
           </Table>
           <p className="mt-4 text-sm text-gray-400">
-            Note: Leaderboard data is stored in a JSON file on the server. This is not persistent in serverless
-            environments like Vercel. For a production application, a database is recommended.
+            Note: Leaderboard data is stored in Supabase. Ensure your Supabase project is configured correctly.
           </p>
         </div>
       </div>
