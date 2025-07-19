@@ -15,7 +15,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { supabase } from "@/lib/supabaseClient" // Import Supabase client
+import { getSupabaseClient } from "@/lib/supabaseClient" // Import Supabase client
 
 type Cell = {
   value: number | null
@@ -64,7 +64,14 @@ export default function LetterFusion() {
   const [timeToWin, setTimeToWin] = useState<number | null>(null)
   const [gameOutcome, setGameOutcome] = useState<"win" | "lose" | null>(null)
 
+  // Obtain the browser Supabase client (may be null if env vars missing)
+  const supabase = getSupabaseClient()
+
   const fetchLeaderboard = useCallback(async () => {
+    if (!supabase) {
+      setLeaderboardData([])
+      return
+    }
     try {
       const { data, error } = await supabase
         .from("leaderboard")
@@ -90,7 +97,7 @@ export default function LetterFusion() {
       console.error("Error fetching leaderboard:", error)
       setLeaderboardData([]) // Set to empty on error
     }
-  }, [])
+  }, [supabase])
 
   // Initialize game and fetch leaderboard on mount
   useEffect(() => {
@@ -414,6 +421,11 @@ export default function LetterFusion() {
   }
 
   const handleSubmitScore = async () => {
+    if (!supabase) {
+      alert("Supabase is not configured in this environment.")
+      return
+    }
+
     if (nickname.trim() === "") {
       alert("Please enter a nickname.")
       return
@@ -447,7 +459,13 @@ export default function LetterFusion() {
   }
 
   return (
-    <div className="relative flex flex-col items-center justify-center min-h-screen p-4 overflow-hidden mx-auto">
+    <div
+      className="relative flex flex-col items-center justify-center min-h-screen p-4 overflow-hidden mx-auto"
+      style={{
+        background: `linear-gradient(to bottom, #2c1d46, #0b0914)`, // Gradient for background
+      }}
+    >
+      {/* Background Image - now on top of the gradient */}
       <Image
         alt="Abstract purple landscape with glowing cube"
         src="/images/background.png"
@@ -456,10 +474,11 @@ export default function LetterFusion() {
         fill
         sizes="100vw"
         style={{
-          objectFit: "cover",
-          zIndex: -1,
+          objectFit: "contain", // Ensure image is fully visible
+          zIndex: 0, // Set z-index to be above the gradient background
         }}
       />
+      {/* Main content wrapper - now with a higher z-index */}
       <div className="relative z-10 w-full max-w-5xl mx-auto flex flex-col lg:flex-row gap-8 items-start">
         {/* Game Board Section */}
         <div className="flex-1 w-full max-w-md mx-auto lg:mx-0">
