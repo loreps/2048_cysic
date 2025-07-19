@@ -15,7 +15,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { getSupabaseClient } from "@/lib/supabaseClient" // Import Supabase client
+import { supabase } from "@/lib/supabaseClient" // Import Supabase client
 
 type Cell = {
   value: number | null
@@ -64,14 +64,7 @@ export default function LetterFusion() {
   const [timeToWin, setTimeToWin] = useState<number | null>(null)
   const [gameOutcome, setGameOutcome] = useState<"win" | "lose" | null>(null)
 
-  // Obtain the browser Supabase client (may be null if env vars missing)
-  const supabase = getSupabaseClient()
-
   const fetchLeaderboard = useCallback(async () => {
-    if (!supabase) {
-      setLeaderboardData([])
-      return
-    }
     try {
       const { data, error } = await supabase
         .from("leaderboard")
@@ -97,7 +90,7 @@ export default function LetterFusion() {
       console.error("Error fetching leaderboard:", error)
       setLeaderboardData([]) // Set to empty on error
     }
-  }, [supabase])
+  }, [])
 
   // Initialize game and fetch leaderboard on mount
   useEffect(() => {
@@ -421,11 +414,6 @@ export default function LetterFusion() {
   }
 
   const handleSubmitScore = async () => {
-    if (!supabase) {
-      alert("Supabase is not configured in this environment.")
-      return
-    }
-
     if (nickname.trim() === "") {
       alert("Please enter a nickname.")
       return
@@ -460,12 +448,12 @@ export default function LetterFusion() {
 
   return (
     <div
-      className="relative flex flex-col items-center justify-center min-h-screen p-4 overflow-hidden mx-auto"
+      className="relative min-h-screen flex flex-col items-center justify-start p-4 overflow-auto" // Changed to justify-start and overflow-auto
       style={{
         background: `linear-gradient(to bottom, #2c1d46, #0b0914)`, // Gradient for background
       }}
     >
-      {/* Background Image - now on top of the gradient */}
+      {/* Background Image - positioned absolutely to cover the whole area */}
       <Image
         alt="Abstract purple landscape with glowing cube"
         src="/images/background.png"
@@ -474,12 +462,18 @@ export default function LetterFusion() {
         fill
         sizes="100vw"
         style={{
-          objectFit: "contain", // Ensure image is fully visible
-          zIndex: 0, // Set z-index to be above the gradient background
+          objectFit: "cover",
+          zIndex: 0, // Behind content
         }}
       />
-      {/* Main content wrapper - now with a higher z-index */}
-      <div className="relative z-10 w-full max-w-5xl mx-auto flex flex-col lg:flex-row gap-8 items-start">
+      {/* Logo - positioned relative to the min-h-screen div */}
+      <div className="absolute top-4 left-4 z-20">
+        <Image src="/images/cysic-logo.svg" alt="Cysic Logo" width={480} height={160} />
+      </div>
+      {/* Spacer for logo to push content down */}
+      <div className="h-[200px] sm:h-[220px] lg:h-[240px] w-full"></div> {/* Responsive spacer */}
+      {/* Main content wrapper (game board + leaderboard) */}
+      <div className="relative z-10 flex-grow w-full max-w-5xl flex flex-col lg:flex-row gap-8 items-start justify-center">
         {/* Game Board Section */}
         <div className="flex-1 w-full max-w-md mx-auto lg:mx-0">
           <div className="flex justify-between items-center mb-4">
@@ -617,12 +611,10 @@ export default function LetterFusion() {
           </p>
         </div>
       </div>
-
       {/* Footer */}
       <div className="relative z-10 mt-8 text-center text-gray-400 text-lg font-bold">
         <p className="text-lg font-bold">Created for the Cysic project with love. Developer LeBwA</p>
       </div>
-
       {/* Nickname Input Modal */}
       <Dialog open={showNicknameModal} onOpenChange={setShowNicknameModal}>
         <DialogContent className="sm:max-w-[425px] bg-gray-900 text-white border-gray-700">
